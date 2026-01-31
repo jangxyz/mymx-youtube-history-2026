@@ -14,7 +14,9 @@ An Electron-based desktop application for managing and tracking personal YouTube
 - Need a personal solution for automated watch history tracking and management
 
 ### Solution
-Use Playwright browser automation within an Electron app to scrape YouTube's watch history page while the user is logged in.
+Hybrid approach combining Google Takeout for initial data seeding and Playwright browser automation for incremental updates:
+1. **Initial Seed**: Import historical watch history from Google Takeout export
+2. **Incremental Updates**: Use Playwright to fetch new watch history entries going forward
 
 ## Target Users
 
@@ -48,13 +50,20 @@ Electron App
 ## Key Features
 
 ### Phase 1: Core Functionality
-1. **Browser Automation**
+
+1. **Google Takeout Import (Initial Seed)**
+   - Parse Google Takeout watch history JSON/HTML files
+   - Import historical watch data into local database
+   - Handle Google Takeout data format
+   - Provide import UI/workflow
+
+2. **Browser Automation (Incremental Updates)**
    - Launch browser with persistent user data (maintain login state)
    - Navigate to `youtube.com/feed/history`
-   - Handle infinite scroll to load historical content
+   - Fetch only new entries since last sync
    - Extract video data from DOM
 
-2. **Data Extraction**
+3. **Data Extraction**
    - Video ID
    - Video title
    - Channel name
@@ -65,23 +74,40 @@ Electron App
    - View count (optional)
    - Description (optional)
 
-3. **Local Storage**
+4. **Local Storage**
    - Options: SQLite (structured) or JSON files (simple)
    - Store extracted watch history
    - Prevent duplicate entries
+   - Track last sync timestamp
 
-4. **Basic UI**
+5. **Basic UI**
    - Display watch history
-   - Manual sync trigger
+   - Import from Google Takeout
+   - Manual incremental sync trigger
    - Basic search/filter
 
 ### Phase 2: Enhanced Features (Future)
-- Incremental sync (fetch only new videos since last sync)
 - Scheduled automatic syncing
+- Re-import from updated Google Takeout (for data verification/recovery)
 - Statistics and analytics dashboard
 - Advanced search and filtering
 - Export capabilities (CSV, JSON)
 - Cloud sync to external database
+
+## Google Takeout Data Format
+
+### Expected Format
+Google Takeout provides YouTube watch history in the following format:
+- **File**: `watch-history.json` or `watch-history.html`
+- **Structure**: Array of watch events with video metadata
+- **Fields**: Video title, video ID, channel name, watch timestamp, URL
+
+### Parsing Requirements
+- Handle both JSON and HTML formats
+- Extract video ID from YouTube URL
+- Parse timestamp into standardized format
+- Handle missing or incomplete data gracefully
+- Detect and skip duplicate entries
 
 ## Storage & Sync Strategy
 
@@ -97,6 +123,10 @@ Electron App
 ## Technical Considerations
 
 ### Advantages
+- **Hybrid Approach**: Combines official data source (Takeout) with automation (Playwright)
+- **Complete History**: Google Takeout provides full historical data from account creation
+- **Efficient Updates**: Playwright only needs to fetch recent entries incrementally
+- **Reduced Scraping**: Minimizes browser automation usage, making it more maintainable
 - Full control over personal data
 - Works with user's actual logged-in YouTube account
 - Can run on-demand or scheduled
@@ -112,13 +142,20 @@ Electron App
 
 ## User Flow
 
-1. User launches Electron app
-2. App opens browser window (Playwright) or uses existing login session
+### Initial Setup
+1. User launches Electron app (first time)
+2. User exports YouTube watch history via Google Takeout
+3. User imports Takeout data file into app
+4. App parses and stores historical data in local database
+
+### Incremental Updates
+1. User triggers sync (manual or scheduled)
+2. App opens browser window (Playwright) with persistent login session
 3. User signs into YouTube (first time only, session persists)
 4. App navigates to youtube.com/feed/history
-5. App scrolls and extracts video data
+5. App fetches only new entries since last sync timestamp
 6. Data is parsed and stored in local database
-7. User can view/search history in app UI
+7. User can view/search complete history in app UI
 8. Optional: Data syncs to cloud database for web access
 
 ## Non-Goals
@@ -131,11 +168,13 @@ Electron App
 
 ## Success Criteria
 
-- Successfully extract watch history from YouTube
+- Successfully import and parse Google Takeout watch history data
+- Successfully extract incremental watch history from YouTube via Playwright
 - Store data locally with no duplicates
-- Provide searchable interface for history
+- Provide searchable interface for complete history
 - Maintain user login session across app launches
-- Handle incremental updates efficiently
+- Handle incremental updates efficiently (only fetch new entries)
+- Seamlessly merge Takeout data with Playwright-scraped data
 
 ## Future Considerations
 
