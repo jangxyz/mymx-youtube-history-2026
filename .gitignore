@@ -1,4 +1,17 @@
+# Dependencies
+node_modules/
 
+# Build output
+dist/
+
+# Electron builder output
+out/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
 
 # Beads local cache
 #.beads/
