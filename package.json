@@ -8,7 +8,8 @@
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && vite build",
     "start": "pnpm build && electron .",
     "dev": "pnpm build && electron .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sync:test": "tsx src/sync/test-playwright.ts"
   },
   "keywords": [
     "youtube",
@@ -19,12 +20,15 @@
   "license": "ISC",
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
+    "@playwright/test": "^1.58.1",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.1.0",
     "electron": "^40.1.0",
     "electron-builder": "^26.4.0",
+    "playwright": "^1.58.1",
     "svelte": "^5.49.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"
