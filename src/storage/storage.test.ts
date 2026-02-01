@@ -6,6 +6,7 @@ import { SyncMetaManager } from './sync-meta.js';
 import { NotesRepository } from './notes-repository.js';
 import { TagsRepository } from './tags-repository.js';
 import { VideoTagsRepository } from './video-tags-repository.js';
+import { ExportService } from './export-service.js';
 import * as schema from './schema.js';
 import type { InsertWatchHistoryEntry } from './types.js';
 import type { DrizzleDB } from './database.js';
@@ -757,5 +758,124 @@ describe('WatchHistoryRepository - Tag Filtering', () => {
 
     const count = await repo.count({ tagIds: [tag.id] });
     expect(count).toBe(1);
+  });
+});
+
+describe('ExportService', () => {
+  let db: DrizzleDB;
+  let sqlite: Database.Database;
+  let repo: WatchHistoryRepository;
+  let notesRepo: NotesRepository;
+  let tagsRepo: TagsRepository;
+  let videoTagsRepo: VideoTagsRepository;
+  let exportService: ExportService;
+
+  beforeEach(async () => {
+    const testDb = createTestDb();
+    db = testDb.db;
+    sqlite = testDb.sqlite;
+    repo = new WatchHistoryRepository(db);
+    notesRepo = new NotesRepository(db);
+    tagsRepo = new TagsRepository(db);
+    videoTagsRepo = new VideoTagsRepository(db);
+    exportService = new ExportService(db);
+
+    // Insert test video with notes and tags
+    await repo.insert(createTestEntry({ videoId: 'vid1', title: 'Video 1' }));
+    const entries = await repo.getByVideoId('vid1');
+    const watchHistoryId = entries[0].id;
+
+    await notesRepo.add(watchHistoryId, 'This is a great tutorial');
+    await notesRepo.add(watchHistoryId, 'Watch at 5:30 for the key part');
+
+    const tag1 = await tagsRepo.create('tutorial');
+    const tag2 = await tagsRepo.create('programming');
+    await videoTagsRepo.assign(watchHistoryId, tag1.id);
+    await videoTagsRepo.assign(watchHistoryId, tag2.id);
+  });
+
+  afterEach(() => {
+    sqlite.close();
+  });
+
+  it('exports entries with notes and tags', async () => {
+    const result = await exportService.exportAll();
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].notes).toHaveLength(2);
+    expect(result.entries[0].tags).toHaveLength(2);
+    expect(result.entries[0].tags).toContain('tutorial');
+    expect(result.entries[0].tags).toContain('programming');
+  });
+
+  it('includes correct stats', async () => {
+    const result = await exportService.exportAll();
+
+    expect(result.stats.totalEntries).toBe(1);
+    expect(result.stats.entriesWithNotes).toBe(1);
+    expect(result.stats.entriesWithTags).toBe(1);
+    expect(result.stats.totalNotes).toBe(2);
+    expect(result.stats.totalTags).toBe(2);
+  });
+
+  it('exports to JSONL format', async () => {
+    const jsonl = await exportService.exportToJsonl();
+    const lines = jsonl.split('\n');
+
+    expect(lines).toHaveLength(1);
+
+    const entry = JSON.parse(lines[0]);
+    expect(entry.videoId).toBe('vid1');
+    expect(entry.notes).toHaveLength(2);
+    expect(entry.tags).toHaveLength(2);
+  });
+
+  it('imports from JSONL format', async () => {
+    // Export first
+    const jsonl = await exportService.exportToJsonl();
+
+    // Create a new database for import
+    const newTestDb = createTestDb();
+    const newExportService = new ExportService(newTestDb.db);
+
+    // Import
+    const result = await newExportService.importFromJsonl(jsonl);
+
+    expect(result.imported).toBe(1);
+    expect(result.notesCreated).toBe(2);
+    expect(result.tagAssignments).toBe(2);
+
+    // Verify data was imported
+    const newRepo = new WatchHistoryRepository(newTestDb.db);
+    const entries = await newRepo.getByVideoId('vid1');
+    expect(entries).toHaveLength(1);
+
+    const newNotesRepo = new NotesRepository(newTestDb.db);
+    const notes = await newNotesRepo.getByWatchHistoryId(entries[0].id);
+    expect(notes).toHaveLength(2);
+
+    newTestDb.sqlite.close();
+  });
+
+  it('handles duplicate entries on import', async () => {
+    const jsonl = await exportService.exportToJsonl();
+
+    // Import into same database (should be duplicate)
+    const result = await exportService.importFromJsonl(jsonl);
+
+    expect(result.duplicates).toBe(1);
+    expect(result.imported).toBe(0);
+  });
+
+  it('exports entries without annotations', async () => {
+    // Add a video without notes or tags
+    await repo.insert(createTestEntry({ videoId: 'vid2', title: 'Video 2' }));
+
+    const result = await exportService.exportAll();
+
+    expect(result.entries).toHaveLength(2);
+    const vid2 = result.entries.find((e) => e.videoId === 'vid2');
+    expect(vid2?.notes).toHaveLength(0);
+    expect(vid2?.tags).toHaveLength(0);
   });
 });

@@ -12,5 +12,7 @@ export { SyncMetaManager } from './sync-meta.js';
 export { NotesRepository } from './notes-repository.js';
 export { TagsRepository } from './tags-repository.js';
 export { VideoTagsRepository } from './video-tags-repository.js';
+export { ExportService } from './export-service.js';
 export type { TagWithCount } from './tags-repository.js';
+export type { ExportEntry, ExportResult, ImportResult } from './export-service.js';
 export * as schema from './schema.js';
