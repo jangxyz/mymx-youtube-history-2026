@@ -15,4 +15,14 @@ out/
 
 # Beads local cache
 #.beads/
+
+# Database
 watch-history.db
+
+# Chrome profile for Playwright (contains login session)
+.chrome-profile/
+
+# Test screenshots
+test-screenshot.png
+.playwright-profile/
+history-output.json

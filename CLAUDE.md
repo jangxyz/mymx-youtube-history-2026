@@ -12,6 +12,31 @@ bd close <id>         # Complete work
 bd sync               # Sync with git
 ```
 
+## Working on Epics
+
+When starting work on an epic:
+
+1. **Create a feature branch** from main:
+   ```bash
+   git checkout main
+   git pull
+   git checkout -b beads-epic/<epic-name>
+   ```
+
+2. **Work on child issues** within that branch:
+   - Complete each child issue
+   - Create a commit for each child issue completed
+   - Include task ID in commit title: `<type>(<task-id>): <description>`
+   - Example: `feat(yhr.3): extract video metadata from YouTube history DOM`
+
+3. **When epic is complete**, merge back to main:
+   ```bash
+   git checkout main
+   git pull
+   git merge beads-epic/<epic-name>
+   git push
+   ```
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
