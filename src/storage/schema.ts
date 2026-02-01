@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, index, unique } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
+import { relations } from 'drizzle-orm';
 
 /**
  * Watch history entries table
@@ -36,7 +37,97 @@ export const syncMeta = sqliteTable('sync_meta', {
   value: text('value'),
 });
 
+/**
+ * Notes table - free-form text notes on videos
+ */
+export const notes = sqliteTable(
+  'notes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    watchHistoryId: integer('watch_history_id')
+      .notNull()
+      .references(() => watchHistory.id, { onDelete: 'cascade' }),
+    content: text('content').notNull(),
+    createdAt: text('created_at').default("datetime('now')"),
+    updatedAt: text('updated_at').default("datetime('now')"),
+  },
+  (table) => [
+    index('idx_notes_watch_history_id').on(table.watchHistoryId),
+  ]
+);
+
+/**
+ * Tags table - user-defined labels
+ */
+export const tags = sqliteTable(
+  'tags',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    name: text('name').notNull().unique(),
+    color: text('color'), // Optional hex color for UI
+    createdAt: text('created_at').default("datetime('now')"),
+  },
+  (table) => [
+    index('idx_tags_name').on(table.name),
+  ]
+);
+
+/**
+ * Video-Tags junction table - many-to-many relationship
+ */
+export const videoTags = sqliteTable(
+  'video_tags',
+  {
+    watchHistoryId: integer('watch_history_id')
+      .notNull()
+      .references(() => watchHistory.id, { onDelete: 'cascade' }),
+    tagId: integer('tag_id')
+      .notNull()
+      .references(() => tags.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').default("datetime('now')"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.watchHistoryId, table.tagId] }),
+    index('idx_video_tags_watch_history_id').on(table.watchHistoryId),
+    index('idx_video_tags_tag_id').on(table.tagId),
+  ]
+);
+
+// Relations for Drizzle query builder
+export const watchHistoryRelations = relations(watchHistory, ({ many }) => ({
+  notes: many(notes),
+  videoTags: many(videoTags),
+}));
+
+export const notesRelations = relations(notes, ({ one }) => ({
+  watchHistory: one(watchHistory, {
+    fields: [notes.watchHistoryId],
+    references: [watchHistory.id],
+  }),
+}));
+
+export const tagsRelations = relations(tags, ({ many }) => ({
+  videoTags: many(videoTags),
+}));
+
+export const videoTagsRelations = relations(videoTags, ({ one }) => ({
+  watchHistory: one(watchHistory, {
+    fields: [videoTags.watchHistoryId],
+    references: [watchHistory.id],
+  }),
+  tag: one(tags, {
+    fields: [videoTags.tagId],
+    references: [tags.id],
+  }),
+}));
+
 // Type exports inferred from schema
 export type WatchHistoryRecord = typeof watchHistory.$inferSelect;
 export type NewWatchHistoryRecord = typeof watchHistory.$inferInsert;
 export type SyncMetaRecord = typeof syncMeta.$inferSelect;
+export type NoteRecord = typeof notes.$inferSelect;
+export type NewNoteRecord = typeof notes.$inferInsert;
+export type TagRecord = typeof tags.$inferSelect;
+export type NewTagRecord = typeof tags.$inferInsert;
+export type VideoTagRecord = typeof videoTags.$inferSelect;
+export type NewVideoTagRecord = typeof videoTags.$inferInsert;

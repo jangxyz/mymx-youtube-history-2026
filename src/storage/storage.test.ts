@@ -11,6 +11,9 @@ import type { DrizzleDB } from './database.js';
 function createTestDb(): { db: DrizzleDB; sqlite: Database.Database } {
   const sqlite = new Database(':memory:');
 
+  // Enable foreign keys
+  sqlite.pragma('foreign_keys = ON');
+
   sqlite.exec(`
     CREATE TABLE watch_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +35,35 @@ function createTestDb(): { db: DrizzleDB; sqlite: Database.Database } {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+
+    CREATE TABLE notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      watch_history_id INTEGER NOT NULL REFERENCES watch_history(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX idx_notes_watch_history_id ON notes(watch_history_id);
+
+    CREATE TABLE tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      color TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX idx_tags_name ON tags(name);
+
+    CREATE TABLE video_tags (
+      watch_history_id INTEGER NOT NULL REFERENCES watch_history(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+      created_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (watch_history_id, tag_id)
+    );
+
+    CREATE INDEX idx_video_tags_watch_history_id ON video_tags(watch_history_id);
+    CREATE INDEX idx_video_tags_tag_id ON video_tags(tag_id);
   `);
 
   const db = drizzle(sqlite, { schema });
