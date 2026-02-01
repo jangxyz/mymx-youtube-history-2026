@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 const SCHEMA_VERSION = 1;
 
@@ -17,8 +20,6 @@ function isElectron(): boolean {
  */
 export function getDefaultDbPath(): string {
   if (isElectron()) {
-    // Dynamic import to avoid issues when not in Electron
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { app } = require('electron');
     return path.join(app.getPath('userData'), 'watch-history.db');
   }
