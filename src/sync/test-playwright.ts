@@ -63,12 +63,87 @@ async function main() {
     if (isLoggedIn) {
       console.log('\n✓ You are logged in!');
 
+      // Wait for content to load and scroll down to get more videos
+      await page.waitForTimeout(2000);
+      await page.evaluate(() => window.scrollBy(0, 1000));
       await page.waitForTimeout(2000);
       await page.screenshot({ path: 'test-screenshot.png' });
       console.log('Screenshot saved to test-screenshot.png');
 
-      const videoEntries = await page.$$('ytd-video-renderer, ytd-reel-shelf-renderer');
-      console.log(`Found ${videoEntries.length} video entries on page`);
+      // Extract video entries with section context (for watchedAt)
+      const videos = await page.$$eval('ytd-video-renderer', (elements) => {
+        return elements.slice(0, 10).map((el) => {
+          // Video link contains the videoId
+          const linkEl = el.querySelector('a#video-title-link, a#video-title, a#thumbnail');
+          const href = linkEl?.getAttribute('href') || '';
+
+          // Handle different URL formats:
+          // /watch?v=VIDEO_ID or /shorts/VIDEO_ID
+          let videoId: string | null = null;
+          const watchMatch = href.match(/[?&]v=([^&]+)/);
+          const shortsMatch = href.match(/\/shorts\/([^?&/]+)/);
+          if (watchMatch) videoId = watchMatch[1];
+          else if (shortsMatch) videoId = shortsMatch[1];
+
+          // Title
+          const titleEl = el.querySelector('#video-title');
+          const title = titleEl?.textContent?.trim() || '';
+
+          // Channel name
+          const channelEl = el.querySelector('#channel-name a, #text.ytd-channel-name a, ytd-channel-name a');
+          const channel = channelEl?.textContent?.trim() || '';
+
+          // Thumbnail - can be constructed from videoId if not found in DOM
+          const thumbEl = el.querySelector('ytd-thumbnail img, #thumbnail img, img');
+          let thumbnail = thumbEl?.getAttribute('src') || '';
+          if (!thumbnail) {
+            thumbnail = thumbEl?.getAttribute('data-src') || '';
+          }
+
+          // Metadata (contains view count and time ago)
+          const metaEl = el.querySelector('#metadata-line');
+          const metadata = metaEl?.textContent?.trim() || '';
+
+          // Find section header (Today, Yesterday, etc.) by walking up the DOM
+          let watchedAt = '';
+          let parent = el.parentElement;
+          while (parent) {
+            // Look for section header in parent or previous siblings
+            const sectionHeader = parent.querySelector('ytd-item-section-header-renderer #title');
+            if (sectionHeader) {
+              watchedAt = sectionHeader.textContent?.trim() || '';
+              break;
+            }
+            // Check previous sibling for section header
+            const prevSibling = parent.previousElementSibling;
+            if (prevSibling) {
+              const header = prevSibling.querySelector('#title');
+              if (header) {
+                watchedAt = header.textContent?.trim() || '';
+                break;
+              }
+            }
+            parent = parent.parentElement;
+          }
+
+          // Video type
+          const isShort = href.includes('/shorts/');
+
+          return { videoId, title, channel, thumbnail, metadata, href, watchedAt, isShort };
+        });
+      });
+
+      console.log(`\nFound ${videos.length} video entries:`);
+      videos.forEach((v, i) => {
+        // Construct thumbnail URL from videoId if not found
+        const thumbUrl = v.thumbnail || (v.videoId ? `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg` : null);
+
+        console.log(`\n[${i + 1}] ${v.title}`);
+        console.log(`    ID: ${v.videoId}${v.isShort ? ' (Short)' : ''}`);
+        console.log(`    Channel: ${v.channel}`);
+        console.log(`    Watched: ${v.watchedAt || '(unknown)'}`);
+        console.log(`    Thumbnail: ${thumbUrl ? thumbUrl.substring(0, 60) + '...' : '(none)'}`);
+      });
 
     } else {
       console.log('\n⚠ Not logged in.');
