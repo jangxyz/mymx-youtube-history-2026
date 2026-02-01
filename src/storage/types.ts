@@ -29,6 +29,8 @@ export interface QueryOptions {
   dateFrom?: string; // ISO 8601
   dateTo?: string; // ISO 8601
   includeAds?: boolean;
+  tagIds?: number[]; // Filter by tags
+  tagLogic?: 'AND' | 'OR'; // How to combine multiple tags (default: OR)
 }
 
 /**

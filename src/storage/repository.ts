@@ -1,6 +1,6 @@
-import { eq, like, and, desc, asc, sql, or } from 'drizzle-orm';
+import { eq, like, and, desc, asc, sql, or, inArray } from 'drizzle-orm';
 import type { DrizzleDB } from './database.js';
-import { watchHistory } from './schema.js';
+import { watchHistory, videoTags } from './schema.js';
 import type {
   StoredWatchHistoryEntry,
   InsertWatchHistoryEntry,
@@ -116,6 +116,8 @@ export class WatchHistoryRepository {
       dateFrom,
       dateTo,
       includeAds = true,
+      tagIds,
+      tagLogic = 'OR',
     } = options;
 
     const conditions = [];
@@ -139,6 +141,15 @@ export class WatchHistoryRepository {
 
     if (dateTo) {
       conditions.push(sql`${watchHistory.watchedAt} <= ${dateTo}`);
+    }
+
+    // Filter by tags
+    if (tagIds && tagIds.length > 0) {
+      const matchingIds = await this.getWatchHistoryIdsByTags(tagIds, tagLogic);
+      if (matchingIds.length === 0) {
+        return []; // No videos match the tag filter
+      }
+      conditions.push(inArray(watchHistory.id, matchingIds));
     }
 
     const orderColumn = {
@@ -165,12 +176,42 @@ export class WatchHistoryRepository {
   }
 
   /**
+   * Get watch history IDs that match tag filter
+   */
+  private async getWatchHistoryIdsByTags(
+    tagIds: number[],
+    logic: 'AND' | 'OR'
+  ): Promise<number[]> {
+    if (tagIds.length === 0) return [];
+
+    const assignments = this.db
+      .select({ watchHistoryId: videoTags.watchHistoryId })
+      .from(videoTags)
+      .where(inArray(videoTags.tagId, tagIds))
+      .all();
+
+    if (logic === 'OR') {
+      // Any tag matches - return unique IDs
+      return [...new Set(assignments.map((a) => a.watchHistoryId))];
+    } else {
+      // AND logic - must have ALL tags
+      const countByVideo = new Map<number, number>();
+      for (const { watchHistoryId } of assignments) {
+        countByVideo.set(watchHistoryId, (countByVideo.get(watchHistoryId) ?? 0) + 1);
+      }
+      return [...countByVideo.entries()]
+        .filter(([, count]) => count === tagIds.length)
+        .map(([id]) => id);
+    }
+  }
+
+  /**
    * Count total entries matching query
    */
   async count(
     options: Omit<QueryOptions, 'limit' | 'offset' | 'orderBy' | 'orderDir'> = {}
   ): Promise<number> {
-    const { search, dateFrom, dateTo, includeAds = true } = options;
+    const { search, dateFrom, dateTo, includeAds = true, tagIds, tagLogic = 'OR' } = options;
 
     const conditions = [];
 
@@ -193,6 +234,15 @@ export class WatchHistoryRepository {
 
     if (dateTo) {
       conditions.push(sql`${watchHistory.watchedAt} <= ${dateTo}`);
+    }
+
+    // Filter by tags
+    if (tagIds && tagIds.length > 0) {
+      const matchingIds = await this.getWatchHistoryIdsByTags(tagIds, tagLogic);
+      if (matchingIds.length === 0) {
+        return 0; // No videos match the tag filter
+      }
+      conditions.push(inArray(watchHistory.id, matchingIds));
     }
 
     let query = this.db
