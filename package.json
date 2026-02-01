@@ -11,7 +11,8 @@
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "cli:export": "tsc -p tsconfig.main.json && node dist/cli/export.js"
   },
   "keywords": [
     "youtube",

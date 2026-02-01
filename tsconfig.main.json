@@ -18,7 +18,8 @@
   "include": [
     "src/main/**/*",
     "src/parser/**/*",
-    "src/storage/**/*"
+    "src/storage/**/*",
+    "src/cli/**/*"
   ],
   "exclude": ["node_modules", "dist", "src/renderer"]
 }

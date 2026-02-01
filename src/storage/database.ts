@@ -8,6 +8,9 @@ const require = createRequire(import.meta.url);
 
 export type DrizzleDB = ReturnType<typeof drizzle<typeof schema>>;
 
+// Store sqlite instances for cleanup
+const sqliteInstances = new WeakMap<DrizzleDB, Database.Database>();
+
 /**
  * Check if running in Electron main process
  */
@@ -42,6 +45,9 @@ export function initDatabase(dbPath?: string): DrizzleDB {
   sqlite.pragma('foreign_keys = ON');
 
   const db = drizzle(sqlite, { schema });
+
+  // Store reference for cleanup
+  sqliteInstances.set(db, sqlite);
 
   // Run initial schema creation if needed
   ensureSchema(sqlite);
@@ -166,15 +172,17 @@ function migrateToV2(sqlite: Database.Database): void {
  * Get the underlying better-sqlite3 instance from Drizzle
  * (useful for raw queries or closing)
  */
-export function getUnderlyingDb(db: DrizzleDB): Database.Database {
-  // Access the internal session to get the client
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (db as any)._.session.client as Database.Database;
+export function getUnderlyingDb(db: DrizzleDB): Database.Database | undefined {
+  return sqliteInstances.get(db);
 }
 
 /**
  * Close database connection
  */
 export function closeDatabase(db: DrizzleDB): void {
-  getUnderlyingDb(db).close();
+  const sqlite = sqliteInstances.get(db);
+  if (sqlite) {
+    sqlite.close();
+    sqliteInstances.delete(db);
+  }
 }
