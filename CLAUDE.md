@@ -26,7 +26,8 @@ When starting work on an epic:
 2. **Work on child issues** within that branch:
    - Complete each child issue
    - Create a commit for each child issue completed
-   - Use commit message format: `<type>: <description> (closes <child-id>)`
+   - Include task ID in commit title: `<type>(<task-id>): <description>`
+   - Example: `feat(yhr.3): extract video metadata from YouTube history DOM`
 
 3. **When epic is complete**, merge back to main:
    ```bash
