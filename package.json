@@ -11,6 +11,7 @@
     "test": "vitest run",
     "sync:login": "tsx src/sync/login.ts",
     "sync:check": "tsx src/sync/check.ts",
+    "sync:fetch": "tsx src/sync/fetch-history.ts",
     "sync:test": "tsx src/sync/test-playwright.ts"
   },
   "keywords": [

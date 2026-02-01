@@ -22,3 +22,4 @@ out/
 # Test screenshots
 test-screenshot.png
 .playwright-profile/
+history-output.json
