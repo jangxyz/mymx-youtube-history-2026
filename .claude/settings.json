@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bd --help:*)",
+      "Bash(bd add:*)",
+      "Bash(bd config list:*)",
+      "Bash(bd create:*)",
+      "Bash(bd list:*)",
+      "Bash(bd migrate:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd rename:*)",
+      "Bash(bd update:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git stash:*)",
+      "Bash(node --version:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm run dev)",
+      "Bash(pnpm test:*)"
+    ]
+  }
+}
