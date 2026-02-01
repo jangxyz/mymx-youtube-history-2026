@@ -5,17 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { parseTakeoutFile } from '../parser/index.js';
 import {
   initDatabase,
+  closeDatabase,
   WatchHistoryRepository,
   SyncMetaManager,
 } from '../storage/index.js';
+import type { DrizzleDB } from '../storage/index.js';
 import type { QueryOptions } from '../storage/types.js';
-import type Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Database and repositories (initialized on app ready)
-let db: Database.Database;
+let db: DrizzleDB;
 let repo: WatchHistoryRepository;
 let syncMeta: SyncMetaManager;
 
@@ -61,10 +62,10 @@ ipcMain.handle('import-takeout', async (_event, filePath: string) => {
     }));
 
     // Bulk insert
-    const insertResult = repo.bulkInsert(entries);
+    const insertResult = await repo.bulkInsert(entries);
 
     // Update last import timestamp
-    syncMeta.setLastTakeoutImport(new Date().toISOString());
+    await syncMeta.setLastTakeoutImport(new Date().toISOString());
 
     return {
       success: true,
@@ -82,9 +83,9 @@ ipcMain.handle('import-takeout', async (_event, filePath: string) => {
   }
 });
 
-ipcMain.handle('get-history', (_event, options: QueryOptions) => {
-  const entries = repo.query(options);
-  const total = repo.count({
+ipcMain.handle('get-history', async (_event, options: QueryOptions) => {
+  const entries = await repo.query(options);
+  const total = await repo.count({
     search: options.search,
     dateFrom: options.dateFrom,
     dateTo: options.dateTo,
@@ -94,12 +95,12 @@ ipcMain.handle('get-history', (_event, options: QueryOptions) => {
   return { entries, total };
 });
 
-ipcMain.handle('get-stats', () => {
-  const total = repo.count();
-  const nonAds = repo.count({ includeAds: false });
-  const lastTakeoutImport = syncMeta.getLastTakeoutImport();
-  const lastPlaywrightSync = syncMeta.getLastPlaywrightSync();
-  const latestWatched = repo.getLatestWatchedAt();
+ipcMain.handle('get-stats', async () => {
+  const total = await repo.count();
+  const nonAds = await repo.count({ includeAds: false });
+  const lastTakeoutImport = await syncMeta.getLastTakeoutImport();
+  const lastPlaywrightSync = await syncMeta.getLastPlaywrightSync();
+  const latestWatched = await repo.getLatestWatchedAt();
 
   return {
     total,
@@ -111,8 +112,8 @@ ipcMain.handle('get-stats', () => {
   };
 });
 
-ipcMain.handle('delete-entry', (_event, id: number) => {
-  return repo.delete(id);
+ipcMain.handle('delete-entry', async (_event, id: number) => {
+  return await repo.delete(id);
 });
 
 function createWindow(): void {
@@ -161,6 +162,6 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   // Close database connection
   if (db) {
-    db.close();
+    closeDatabase(db);
   }
 });

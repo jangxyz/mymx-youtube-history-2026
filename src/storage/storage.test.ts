@@ -1,14 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { WatchHistoryRepository } from './repository.js';
 import { SyncMetaManager } from './sync-meta.js';
+import * as schema from './schema.js';
 import type { InsertWatchHistoryEntry } from './types.js';
+import type { DrizzleDB } from './database.js';
 
 // Use in-memory database for tests
-function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
+function createTestDb(): { db: DrizzleDB; sqlite: Database.Database } {
+  const sqlite = new Database(':memory:');
 
-  db.exec(`
+  sqlite.exec(`
     CREATE TABLE watch_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       video_id TEXT NOT NULL,
@@ -31,10 +34,13 @@ function createTestDb(): Database.Database {
     );
   `);
 
-  return db;
+  const db = drizzle(sqlite, { schema });
+  return { db, sqlite };
 }
 
-function createTestEntry(overrides: Partial<InsertWatchHistoryEntry> = {}): InsertWatchHistoryEntry {
+function createTestEntry(
+  overrides: Partial<InsertWatchHistoryEntry> = {}
+): InsertWatchHistoryEntry {
   return {
     videoId: 'test123',
     title: 'Test Video',
@@ -50,98 +56,101 @@ function createTestEntry(overrides: Partial<InsertWatchHistoryEntry> = {}): Inse
 }
 
 describe('WatchHistoryRepository', () => {
-  let db: Database.Database;
+  let db: DrizzleDB;
+  let sqlite: Database.Database;
   let repo: WatchHistoryRepository;
 
   beforeEach(() => {
-    db = createTestDb();
+    const testDb = createTestDb();
+    db = testDb.db;
+    sqlite = testDb.sqlite;
     repo = new WatchHistoryRepository(db);
   });
 
   afterEach(() => {
-    db.close();
+    sqlite.close();
   });
 
   describe('insert', () => {
-    it('inserts a new entry', () => {
+    it('inserts a new entry', async () => {
       const entry = createTestEntry();
-      const result = repo.insert(entry);
+      const result = await repo.insert(entry);
       expect(result).toBe(true);
 
-      const stored = repo.getByVideoId('test123');
+      const stored = await repo.getByVideoId('test123');
       expect(stored).toHaveLength(1);
       expect(stored[0].title).toBe('Test Video');
     });
 
-    it('returns false for duplicate entry', () => {
+    it('returns false for duplicate entry', async () => {
       const entry = createTestEntry();
-      repo.insert(entry);
-      const result = repo.insert(entry);
+      await repo.insert(entry);
+      const result = await repo.insert(entry);
       expect(result).toBe(false);
     });
 
-    it('allows same video with different timestamp', () => {
+    it('allows same video with different timestamp', async () => {
       const entry1 = createTestEntry({ watchedAt: '2026-01-31T12:00:00.000Z' });
       const entry2 = createTestEntry({ watchedAt: '2026-01-31T14:00:00.000Z' });
 
-      repo.insert(entry1);
-      const result = repo.insert(entry2);
+      await repo.insert(entry1);
+      const result = await repo.insert(entry2);
       expect(result).toBe(true);
 
-      const stored = repo.getByVideoId('test123');
+      const stored = await repo.getByVideoId('test123');
       expect(stored).toHaveLength(2);
     });
 
-    it('stores boolean isAd correctly', () => {
+    it('stores boolean isAd correctly', async () => {
       const adEntry = createTestEntry({ videoId: 'ad123', isAd: true });
-      repo.insert(adEntry);
+      await repo.insert(adEntry);
 
-      const stored = repo.getByVideoId('ad123');
+      const stored = await repo.getByVideoId('ad123');
       expect(stored[0].isAd).toBe(true);
     });
   });
 
   describe('bulkInsert', () => {
-    it('inserts multiple entries', () => {
+    it('inserts multiple entries', async () => {
       const entries = [
         createTestEntry({ videoId: 'vid1' }),
         createTestEntry({ videoId: 'vid2' }),
         createTestEntry({ videoId: 'vid3' }),
       ];
 
-      const result = repo.bulkInsert(entries);
+      const result = await repo.bulkInsert(entries);
       expect(result.inserted).toBe(3);
       expect(result.duplicates).toBe(0);
       expect(result.errors).toHaveLength(0);
     });
 
-    it('handles duplicates in bulk insert', () => {
+    it('handles duplicates in bulk insert', async () => {
       const entry = createTestEntry({ videoId: 'vid1' });
-      repo.insert(entry);
+      await repo.insert(entry);
 
       const entries = [
         createTestEntry({ videoId: 'vid1' }), // duplicate
         createTestEntry({ videoId: 'vid2' }), // new
       ];
 
-      const result = repo.bulkInsert(entries);
+      const result = await repo.bulkInsert(entries);
       expect(result.inserted).toBe(1);
       expect(result.duplicates).toBe(1);
     });
 
-    it('is transactional', () => {
+    it('is transactional', async () => {
       const entries = [
         createTestEntry({ videoId: 'vid1' }),
         createTestEntry({ videoId: 'vid2' }),
       ];
 
-      repo.bulkInsert(entries);
-      expect(repo.count()).toBe(2);
+      await repo.bulkInsert(entries);
+      expect(await repo.count()).toBe(2);
     });
   });
 
   describe('query', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       // Insert test data
       const entries = [
         createTestEntry({
@@ -166,42 +175,42 @@ describe('WatchHistoryRepository', () => {
           isAd: true,
         }),
       ];
-      repo.bulkInsert(entries);
+      await repo.bulkInsert(entries);
     });
 
-    it('returns entries ordered by watched_at desc by default', () => {
-      const results = repo.query();
+    it('returns entries ordered by watched_at desc by default', async () => {
+      const results = await repo.query();
       expect(results).toHaveLength(3);
       expect(results[0].videoId).toBe('vid3'); // most recent
       expect(results[2].videoId).toBe('vid1'); // oldest
     });
 
-    it('supports limit and offset', () => {
-      const results = repo.query({ limit: 1, offset: 1 });
+    it('supports limit and offset', async () => {
+      const results = await repo.query({ limit: 1, offset: 1 });
       expect(results).toHaveLength(1);
       expect(results[0].videoId).toBe('vid2');
     });
 
-    it('filters by search term (title)', () => {
-      const results = repo.query({ search: 'First' });
+    it('filters by search term (title)', async () => {
+      const results = await repo.query({ search: 'First' });
       expect(results).toHaveLength(1);
       expect(results[0].title).toBe('First Video');
     });
 
-    it('filters by search term (channel)', () => {
-      const results = repo.query({ search: 'Channel B' });
+    it('filters by search term (channel)', async () => {
+      const results = await repo.query({ search: 'Channel B' });
       expect(results).toHaveLength(1);
       expect(results[0].channelName).toBe('Channel B');
     });
 
-    it('excludes ads when includeAds is false', () => {
-      const results = repo.query({ includeAds: false });
+    it('excludes ads when includeAds is false', async () => {
+      const results = await repo.query({ includeAds: false });
       expect(results).toHaveLength(2);
       expect(results.every((r) => !r.isAd)).toBe(true);
     });
 
-    it('filters by date range', () => {
-      const results = repo.query({
+    it('filters by date range', async () => {
+      const results = await repo.query({
         dateFrom: '2026-01-31T11:00:00.000Z',
         dateTo: '2026-01-31T13:00:00.000Z',
       });
@@ -209,13 +218,13 @@ describe('WatchHistoryRepository', () => {
       expect(results[0].videoId).toBe('vid2');
     });
 
-    it('supports ascending order', () => {
-      const results = repo.query({ orderDir: 'asc' });
+    it('supports ascending order', async () => {
+      const results = await repo.query({ orderDir: 'asc' });
       expect(results[0].videoId).toBe('vid1'); // oldest first
     });
 
-    it('supports ordering by title', () => {
-      const results = repo.query({ orderBy: 'title', orderDir: 'asc' });
+    it('supports ordering by title', async () => {
+      const results = await repo.query({ orderBy: 'title', orderDir: 'asc' });
       expect(results[0].title).toBe('Ad Video');
       expect(results[1].title).toBe('First Video');
       expect(results[2].title).toBe('Second Video');
@@ -223,87 +232,90 @@ describe('WatchHistoryRepository', () => {
   });
 
   describe('count', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       const entries = [
         createTestEntry({ videoId: 'vid1', isAd: false }),
         createTestEntry({ videoId: 'vid2', isAd: false }),
         createTestEntry({ videoId: 'vid3', isAd: true }),
       ];
-      repo.bulkInsert(entries);
+      await repo.bulkInsert(entries);
     });
 
-    it('returns total count', () => {
-      expect(repo.count()).toBe(3);
+    it('returns total count', async () => {
+      expect(await repo.count()).toBe(3);
     });
 
-    it('respects filters', () => {
-      expect(repo.count({ includeAds: false })).toBe(2);
+    it('respects filters', async () => {
+      expect(await repo.count({ includeAds: false })).toBe(2);
     });
   });
 
   describe('getLatestWatchedAt', () => {
-    it('returns null for empty database', () => {
-      expect(repo.getLatestWatchedAt()).toBeNull();
+    it('returns null for empty database', async () => {
+      expect(await repo.getLatestWatchedAt()).toBeNull();
     });
 
-    it('returns most recent timestamp', () => {
-      repo.bulkInsert([
+    it('returns most recent timestamp', async () => {
+      await repo.bulkInsert([
         createTestEntry({ videoId: 'vid1', watchedAt: '2026-01-30T12:00:00.000Z' }),
         createTestEntry({ videoId: 'vid2', watchedAt: '2026-01-31T12:00:00.000Z' }),
       ]);
 
-      expect(repo.getLatestWatchedAt()).toBe('2026-01-31T12:00:00.000Z');
+      expect(await repo.getLatestWatchedAt()).toBe('2026-01-31T12:00:00.000Z');
     });
   });
 
   describe('delete', () => {
-    it('deletes entry by id', () => {
-      repo.insert(createTestEntry({ videoId: 'vid1' }));
-      const entries = repo.getByVideoId('vid1');
+    it('deletes entry by id', async () => {
+      await repo.insert(createTestEntry({ videoId: 'vid1' }));
+      const entries = await repo.getByVideoId('vid1');
       const id = entries[0].id;
 
-      const result = repo.delete(id);
+      const result = await repo.delete(id);
       expect(result).toBe(true);
-      expect(repo.getById(id)).toBeNull();
+      expect(await repo.getById(id)).toBeNull();
     });
 
-    it('returns false for non-existent id', () => {
-      expect(repo.delete(999)).toBe(false);
+    it('returns false for non-existent id', async () => {
+      expect(await repo.delete(999)).toBe(false);
     });
   });
 });
 
 describe('SyncMetaManager', () => {
-  let db: Database.Database;
+  let db: DrizzleDB;
+  let sqlite: Database.Database;
   let meta: SyncMetaManager;
 
   beforeEach(() => {
-    db = createTestDb();
+    const testDb = createTestDb();
+    db = testDb.db;
+    sqlite = testDb.sqlite;
     meta = new SyncMetaManager(db);
   });
 
   afterEach(() => {
-    db.close();
+    sqlite.close();
   });
 
-  it('gets and sets values', () => {
-    meta.set('test_key', 'test_value');
-    expect(meta.get('test_key')).toBe('test_value');
+  it('gets and sets values', async () => {
+    await meta.set('test_key', 'test_value');
+    expect(await meta.get('test_key')).toBe('test_value');
   });
 
-  it('returns null for non-existent key', () => {
-    expect(meta.get('non_existent')).toBeNull();
+  it('returns null for non-existent key', async () => {
+    expect(await meta.get('non_existent')).toBeNull();
   });
 
-  it('tracks last takeout import', () => {
+  it('tracks last takeout import', async () => {
     const timestamp = '2026-01-31T12:00:00.000Z';
-    meta.setLastTakeoutImport(timestamp);
-    expect(meta.getLastTakeoutImport()).toBe(timestamp);
+    await meta.setLastTakeoutImport(timestamp);
+    expect(await meta.getLastTakeoutImport()).toBe(timestamp);
   });
 
-  it('tracks last playwright sync', () => {
+  it('tracks last playwright sync', async () => {
     const timestamp = '2026-01-31T14:00:00.000Z';
-    meta.setLastPlaywrightSync(timestamp);
-    expect(meta.getLastPlaywrightSync()).toBe(timestamp);
+    await meta.setLastPlaywrightSync(timestamp);
+    expect(await meta.getLastPlaywrightSync()).toBe(timestamp);
   });
 });

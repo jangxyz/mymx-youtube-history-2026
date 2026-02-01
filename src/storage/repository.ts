@@ -1,4 +1,6 @@
-import type Database from 'better-sqlite3';
+import { eq, like, and, desc, asc, sql, or } from 'drizzle-orm';
+import type { DrizzleDB } from './database.js';
+import { watchHistory } from './schema.js';
 import type {
   StoredWatchHistoryEntry,
   InsertWatchHistoryEntry,
@@ -8,78 +10,68 @@ import type {
 
 /**
  * Watch history repository for database operations
+ * Uses async interface for future backend flexibility (e.g., PocketBase)
  */
 export class WatchHistoryRepository {
-  private db: Database.Database;
-  private insertStmt: Database.Statement;
-  private getByIdStmt: Database.Statement;
-  private getByVideoIdStmt: Database.Statement;
+  private db: DrizzleDB;
 
-  constructor(db: Database.Database) {
+  constructor(db: DrizzleDB) {
     this.db = db;
-
-    // Prepare commonly used statements
-    this.insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO watch_history
-        (video_id, title, channel_name, channel_url, watched_at, thumbnail_url, video_url, is_ad, source)
-      VALUES
-        (@videoId, @title, @channelName, @channelUrl, @watchedAt, @thumbnailUrl, @url, @isAd, @source)
-    `);
-
-    this.getByIdStmt = db.prepare('SELECT * FROM watch_history WHERE id = ?');
-    this.getByVideoIdStmt = db.prepare(
-      'SELECT * FROM watch_history WHERE video_id = ? ORDER BY watched_at DESC'
-    );
   }
 
   /**
    * Insert a single watch history entry
    * Returns true if inserted, false if duplicate
    */
-  insert(entry: InsertWatchHistoryEntry): boolean {
-    const result = this.insertStmt.run({
-      videoId: entry.videoId,
-      title: entry.title,
-      channelName: entry.channelName,
-      channelUrl: entry.channelUrl,
-      watchedAt: entry.watchedAt,
-      thumbnailUrl: entry.thumbnailUrl,
-      url: entry.url,
-      isAd: entry.isAd ? 1 : 0,
-      source: entry.source,
-    });
-    return result.changes > 0;
+  async insert(entry: InsertWatchHistoryEntry): Promise<boolean> {
+    try {
+      const result = this.db
+        .insert(watchHistory)
+        .values({
+          videoId: entry.videoId,
+          title: entry.title,
+          channelName: entry.channelName,
+          channelUrl: entry.channelUrl,
+          watchedAt: entry.watchedAt,
+          thumbnailUrl: entry.thumbnailUrl,
+          videoUrl: entry.url,
+          isAd: entry.isAd,
+          source: entry.source,
+        })
+        .onConflictDoNothing()
+        .run();
+
+      return result.changes > 0;
+    } catch {
+      return false;
+    }
   }
 
   /**
    * Bulk insert watch history entries (transactional)
    */
-  bulkInsert(entries: InsertWatchHistoryEntry[]): BulkInsertResult {
+  async bulkInsert(entries: InsertWatchHistoryEntry[]): Promise<BulkInsertResult> {
     let inserted = 0;
     let duplicates = 0;
     const errors: Array<{ index: number; message: string }> = [];
 
-    const insertMany = this.db.transaction(
-      (items: InsertWatchHistoryEntry[]) => {
-        for (let i = 0; i < items.length; i++) {
-          try {
-            const wasInserted = this.insert(items[i]);
-            if (wasInserted) {
-              inserted++;
-            } else {
-              duplicates++;
-            }
-          } catch (err) {
-            errors.push({
-              index: i,
-              message: err instanceof Error ? err.message : String(err),
-            });
-          }
+    // Drizzle with better-sqlite3 supports sync transactions
+    // We wrap in async for interface consistency
+    for (let i = 0; i < entries.length; i++) {
+      try {
+        const wasInserted = await this.insert(entries[i]);
+        if (wasInserted) {
+          inserted++;
+        } else {
+          duplicates++;
         }
+      } catch (err) {
+        errors.push({
+          index: i,
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
-    );
-
-    insertMany(entries);
+    }
 
     return { inserted, duplicates, errors };
   }
@@ -87,23 +79,34 @@ export class WatchHistoryRepository {
   /**
    * Get entry by database ID
    */
-  getById(id: number): StoredWatchHistoryEntry | null {
-    const row = this.getByIdStmt.get(id) as DbRow | undefined;
-    return row ? this.mapRowToEntry(row) : null;
+  async getById(id: number): Promise<StoredWatchHistoryEntry | null> {
+    const rows = this.db
+      .select()
+      .from(watchHistory)
+      .where(eq(watchHistory.id, id))
+      .all();
+
+    return rows.length > 0 ? this.mapRowToEntry(rows[0]) : null;
   }
 
   /**
    * Get all entries for a video ID
    */
-  getByVideoId(videoId: string): StoredWatchHistoryEntry[] {
-    const rows = this.getByVideoIdStmt.all(videoId) as DbRow[];
+  async getByVideoId(videoId: string): Promise<StoredWatchHistoryEntry[]> {
+    const rows = this.db
+      .select()
+      .from(watchHistory)
+      .where(eq(watchHistory.videoId, videoId))
+      .orderBy(desc(watchHistory.watchedAt))
+      .all();
+
     return rows.map((row) => this.mapRowToEntry(row));
   }
 
   /**
    * Query watch history with filters and pagination
    */
-  query(options: QueryOptions = {}): StoredWatchHistoryEntry[] {
+  async query(options: QueryOptions = {}): Promise<StoredWatchHistoryEntry[]> {
     const {
       limit = 50,
       offset = 0,
@@ -115,141 +118,136 @@ export class WatchHistoryRepository {
       includeAds = true,
     } = options;
 
-    const conditions: string[] = [];
-    const params: Record<string, unknown> = {};
+    const conditions = [];
 
     if (!includeAds) {
-      conditions.push('is_ad = 0');
+      conditions.push(eq(watchHistory.isAd, false));
     }
 
     if (search) {
-      conditions.push('(title LIKE @search OR channel_name LIKE @search)');
-      params.search = `%${search}%`;
+      conditions.push(
+        or(
+          like(watchHistory.title, `%${search}%`),
+          like(watchHistory.channelName, `%${search}%`)
+        )
+      );
     }
 
     if (dateFrom) {
-      conditions.push('watched_at >= @dateFrom');
-      params.dateFrom = dateFrom;
+      conditions.push(sql`${watchHistory.watchedAt} >= ${dateFrom}`);
     }
 
     if (dateTo) {
-      conditions.push('watched_at <= @dateTo');
-      params.dateTo = dateTo;
+      conditions.push(sql`${watchHistory.watchedAt} <= ${dateTo}`);
     }
 
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
     const orderColumn = {
-      watchedAt: 'watched_at',
-      title: 'title',
-      channelName: 'channel_name',
+      watchedAt: watchHistory.watchedAt,
+      title: watchHistory.title,
+      channelName: watchHistory.channelName,
     }[orderBy];
 
-    const sql = `
-      SELECT * FROM watch_history
-      ${whereClause}
-      ORDER BY ${orderColumn} ${orderDir.toUpperCase()}
-      LIMIT @limit OFFSET @offset
-    `;
+    const orderFn = orderDir === 'desc' ? desc : asc;
 
-    const stmt = this.db.prepare(sql);
-    const rows = stmt.all({ ...params, limit, offset }) as DbRow[];
+    let query = this.db.select().from(watchHistory);
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+
+    const rows = query
+      .orderBy(orderFn(orderColumn))
+      .limit(limit)
+      .offset(offset)
+      .all();
+
     return rows.map((row) => this.mapRowToEntry(row));
   }
 
   /**
    * Count total entries matching query
    */
-  count(options: Omit<QueryOptions, 'limit' | 'offset' | 'orderBy' | 'orderDir'> = {}): number {
+  async count(
+    options: Omit<QueryOptions, 'limit' | 'offset' | 'orderBy' | 'orderDir'> = {}
+  ): Promise<number> {
     const { search, dateFrom, dateTo, includeAds = true } = options;
 
-    const conditions: string[] = [];
-    const params: Record<string, unknown> = {};
+    const conditions = [];
 
     if (!includeAds) {
-      conditions.push('is_ad = 0');
+      conditions.push(eq(watchHistory.isAd, false));
     }
 
     if (search) {
-      conditions.push('(title LIKE @search OR channel_name LIKE @search)');
-      params.search = `%${search}%`;
+      conditions.push(
+        or(
+          like(watchHistory.title, `%${search}%`),
+          like(watchHistory.channelName, `%${search}%`)
+        )
+      );
     }
 
     if (dateFrom) {
-      conditions.push('watched_at >= @dateFrom');
-      params.dateFrom = dateFrom;
+      conditions.push(sql`${watchHistory.watchedAt} >= ${dateFrom}`);
     }
 
     if (dateTo) {
-      conditions.push('watched_at <= @dateTo');
-      params.dateTo = dateTo;
+      conditions.push(sql`${watchHistory.watchedAt} <= ${dateTo}`);
     }
 
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    let query = this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(watchHistory);
 
-    const sql = `SELECT COUNT(*) as count FROM watch_history ${whereClause}`;
-    const stmt = this.db.prepare(sql);
-    const result = stmt.get(params) as { count: number };
-    return result.count;
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+
+    const result = query.get();
+    return result?.count ?? 0;
   }
 
   /**
    * Get the most recent watch timestamp
    */
-  getLatestWatchedAt(): string | null {
+  async getLatestWatchedAt(): Promise<string | null> {
     const result = this.db
-      .prepare('SELECT MAX(watched_at) as latest FROM watch_history')
-      .get() as { latest: string | null };
-    return result.latest;
+      .select({ latest: sql<string | null>`MAX(${watchHistory.watchedAt})` })
+      .from(watchHistory)
+      .get();
+
+    return result?.latest ?? null;
   }
 
   /**
    * Delete entry by ID
    */
-  delete(id: number): boolean {
+  async delete(id: number): Promise<boolean> {
     const result = this.db
-      .prepare('DELETE FROM watch_history WHERE id = ?')
-      .run(id);
+      .delete(watchHistory)
+      .where(eq(watchHistory.id, id))
+      .run();
+
     return result.changes > 0;
   }
 
   /**
    * Map database row to StoredWatchHistoryEntry
    */
-  private mapRowToEntry(row: DbRow): StoredWatchHistoryEntry {
+  private mapRowToEntry(row: typeof watchHistory.$inferSelect): StoredWatchHistoryEntry {
     return {
       id: row.id,
-      videoId: row.video_id,
+      videoId: row.videoId,
       title: row.title,
-      channelName: row.channel_name,
-      channelUrl: row.channel_url,
-      watchedAt: row.watched_at,
-      thumbnailUrl: row.thumbnail_url,
-      url: row.video_url,
-      isAd: row.is_ad === 1,
-      source: row.source as 'takeout' | 'playwright',
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      channelName: row.channelName,
+      channelUrl: row.channelUrl,
+      watchedAt: row.watchedAt,
+      thumbnailUrl: row.thumbnailUrl ?? '',
+      url: row.videoUrl,
+      isAd: row.isAd ?? false,
+      source: row.source,
+      createdAt: row.createdAt ?? '',
+      updatedAt: row.updatedAt ?? '',
     };
   }
-}
-
-/**
- * Database row shape
- */
-interface DbRow {
-  id: number;
-  video_id: string;
-  title: string;
-  channel_name: string | null;
-  channel_url: string | null;
-  watched_at: string;
-  thumbnail_url: string;
-  video_url: string;
-  is_ad: number;
-  source: string;
-  created_at: string;
-  updated_at: string;
 }

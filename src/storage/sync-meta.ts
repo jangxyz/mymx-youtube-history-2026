@@ -1,61 +1,70 @@
-import type Database from 'better-sqlite3';
+import { eq } from 'drizzle-orm';
+import type { DrizzleDB } from './database.js';
+import { syncMeta } from './schema.js';
 
 /**
  * Sync metadata manager for tracking sync state
+ * Uses async interface for consistency with repository
  */
 export class SyncMetaManager {
-  private db: Database.Database;
-  private getStmt: Database.Statement;
-  private setStmt: Database.Statement;
+  private db: DrizzleDB;
 
-  constructor(db: Database.Database) {
+  constructor(db: DrizzleDB) {
     this.db = db;
-    this.getStmt = db.prepare('SELECT value FROM sync_meta WHERE key = ?');
-    this.setStmt = db.prepare(
-      'INSERT OR REPLACE INTO sync_meta (key, value) VALUES (?, ?)'
-    );
   }
 
   /**
    * Get a metadata value
    */
-  get(key: string): string | null {
-    const result = this.getStmt.get(key) as { value: string } | undefined;
+  async get(key: string): Promise<string | null> {
+    const result = this.db
+      .select()
+      .from(syncMeta)
+      .where(eq(syncMeta.key, key))
+      .get();
+
     return result?.value ?? null;
   }
 
   /**
    * Set a metadata value
    */
-  set(key: string, value: string): void {
-    this.setStmt.run(key, value);
+  async set(key: string, value: string): Promise<void> {
+    this.db
+      .insert(syncMeta)
+      .values({ key, value })
+      .onConflictDoUpdate({
+        target: syncMeta.key,
+        set: { value },
+      })
+      .run();
   }
 
   /**
    * Get last Takeout import timestamp
    */
-  getLastTakeoutImport(): string | null {
+  async getLastTakeoutImport(): Promise<string | null> {
     return this.get('last_takeout_import');
   }
 
   /**
    * Set last Takeout import timestamp
    */
-  setLastTakeoutImport(timestamp: string): void {
-    this.set('last_takeout_import', timestamp);
+  async setLastTakeoutImport(timestamp: string): Promise<void> {
+    return this.set('last_takeout_import', timestamp);
   }
 
   /**
    * Get last Playwright sync timestamp
    */
-  getLastPlaywrightSync(): string | null {
+  async getLastPlaywrightSync(): Promise<string | null> {
     return this.get('last_playwright_sync');
   }
 
   /**
    * Set last Playwright sync timestamp
    */
-  setLastPlaywrightSync(timestamp: string): void {
-    this.set('last_playwright_sync', timestamp);
+  async setLastPlaywrightSync(timestamp: string): Promise<void> {
+    return this.set('last_playwright_sync', timestamp);
   }
 }
