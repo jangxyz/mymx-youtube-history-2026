@@ -95,7 +95,7 @@ async function main()
       console.log 'Screenshot saved to test-screenshot.png'
 
       videoEntries := await page.$$ 'ytd-video-renderer, ytd-reel-shelf-renderer'
-      console.log `Found ${#videoEntries} video entries on page`
+      console.log `Found ${videoEntries.length} video entries on page`
 
     else
       console.log '\n⚠ Not logged in.'

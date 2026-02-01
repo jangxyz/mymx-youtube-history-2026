@@ -9,6 +9,7 @@
     "start": "pnpm build && electron .",
     "dev": "pnpm build && electron .",
     "test": "vitest run",
+    "sync:login": "tsx src/sync/login.ts",
     "sync:test": "tsx src/sync/test-playwright.ts"
   },
   "keywords": [

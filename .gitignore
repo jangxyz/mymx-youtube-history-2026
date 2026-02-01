@@ -16,8 +16,9 @@ out/
 # Beads local cache
 #.beads/
 
-# Playwright browser profile (contains login session)
-.playwright-profile/
+# Chrome profile for Playwright (contains login session)
+.chrome-profile/
 
 # Test screenshots
 test-screenshot.png
+.playwright-profile/
